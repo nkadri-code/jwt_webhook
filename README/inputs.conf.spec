@@ -4,6 +4,9 @@
 secret = <value>
 * The secret key to decode the JWT encoded payload
 
+apikey = <value>
+* The API Key used to authenticate to the modular input webserver
+
 port = <value>
 * The port to run the input on
 

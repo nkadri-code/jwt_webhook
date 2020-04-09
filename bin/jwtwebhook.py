@@ -4,12 +4,12 @@ This module implements a modular input consisting of a web-server that handles i
 try:
     # Python 2
     from BaseHTTPServer import BaseHTTPRequestHandler, HTTPServer
-    from urlparse import parse_qs
+    from urlparse import parse_qs, urlparse
 
 except:
     # Python 3
     from http.server import BaseHTTPRequestHandler, HTTPServer
-    from urllib.parse import parse_qs
+    from urllib.parse import parse_qs, urlparse
 
     unicode = str
 
@@ -43,6 +43,16 @@ class LogRequestsInSplunkHandler(BaseHTTPRequestHandler):
 
                 encoded_post_body = self.rfile.read(content_len)
                 
+                # Parse the query and get apikey
+                parsed_qs = parse_qs(urlparse(self.path).query)
+                if "apikey" in parsed_qs:
+                    apikey=parsed_qs["apikey"][0]
+                
+                # Authenticate the query
+                if apikey!=self.server.apikey:
+                    self.write_response(401, {"error": 'Unauthorized.'})
+                    return
+
                 if self.server.secret is not None:
                     # decode body using jwt
                     try:
@@ -111,7 +121,7 @@ class WebServer:
 
     MAX_ATTEMPTS_TO_START_SERVER = 5
 
-    def __init__(self, output_results, port, path, secret, password, cert_file=None, key_file=None, logger=None):
+    def __init__(self, output_results, port, path, secret, apikey, password, cert_file=None, key_file=None, logger=None):
 
         # Make an instance of the server
         server = None
@@ -147,6 +157,7 @@ class WebServer:
         server.path = path
         server.logger = logger
         server.secret = secret
+        server.apikey = apikey
 
         # SSL socket is required on this TA, throw exception if cert file is missing
         if cert_file is not None:
@@ -202,6 +213,9 @@ class JwtWebhooksInput(ModularInput, EventWriter):
             Field('secret', 'Secret',
                   'The secret key to decode the JWT encoded payload, leave it empty if the payload is not JWT encoded.',
                   none_allowed=True, empty_allowed=True),
+            Field('apikey', 'API Key',
+                  'The API Key used by zoom to authenticate to the modular input server',
+                  none_allowed=True, empty_allowed=True),
             Field('path', 'Path',
                   'A wildcard that the path of requests must match (paths generally begin with a "/" and can include a wildcard)',
                   none_allowed=True, empty_allowed=True),
@@ -254,6 +268,7 @@ class JwtWebhooksInput(ModularInput, EventWriter):
         cert_file = cleaned_params.get("cert_file", None)
         masked_secret = cleaned_params.get("secret", None)
         masked_password = cleaned_params.get("password", None)
+        apikey  = cleaned_params.get("apikey", None)
 
         # self.logger.info(input_config)
         session_key = input_config.session_key
@@ -321,7 +336,7 @@ class JwtWebhooksInput(ModularInput, EventWriter):
             # Start the web-server
             self.logger.info("Starting server on port=%r, path=%r, cert_file=%r, key_file=%r, stanza=%s, pid=%r", port,
                              path_re, cert_file, key_file, source, os.getpid())
-            httpd = WebServer(output_results, port, path_re, secret, password, cert_file, key_file, logger=self.logger)
+            httpd = WebServer(output_results, port, path_re, secret,apikey, password, cert_file, key_file, logger=self.logger)
 
             if hasattr(httpd, 'server') and httpd.server is not None:
                 self.http_daemons[stanza] = httpd
